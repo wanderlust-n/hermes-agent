@@ -207,6 +207,25 @@ def test_plugin_pre_tool_block_wins_without_counting_as_toolguard_block():
     assert agent._tool_guardrails.before_call("web_search", args).action == "allow"
 
 
+def test_plugin_pre_tool_block_hard_stop_sets_controlled_halt_decision():
+    agent = _make_agent("web_search", config=_hard_stop_config())
+    args = {"query": "same"}
+    tc = _mock_tool_call("web_search", json.dumps(args), "c-plugin-halt")
+    msg = SimpleNamespace(content="", tool_calls=[tc])
+    messages = []
+
+    with (
+        patch("hermes_cli.plugins.get_pre_tool_call_block_message", return_value="plugin policy"),
+        patch("run_agent.handle_function_call", return_value="SHOULD_NOT_RUN") as mock_hfc,
+    ):
+        agent._execute_tool_calls_sequential(msg, messages, "task-1")
+
+    mock_hfc.assert_not_called()
+    assert "plugin policy" in messages[0]["content"]
+    assert agent._tool_guardrail_halt_decision is not None
+    assert agent._tool_guardrail_halt_decision.code == "plugin_pre_tool_block_halt"
+
+
 def test_default_run_conversation_warns_without_guardrail_halt():
     agent = _make_agent("web_search", max_iterations=10)
     same_args = {"query": "same"}
@@ -235,6 +254,37 @@ def test_default_run_conversation_warns_without_guardrail_halt():
     assert result["final_response"] == "done"
     tool_contents = [m["content"] for m in result["messages"] if m.get("role") == "tool"]
     assert any("repeated_exact_failure_warning" in content for content in tool_contents)
+
+
+def test_plugin_pre_tool_block_hard_stop_run_conversation_stops_after_first_block():
+    agent = _make_agent("web_search", max_iterations=10, config=_hard_stop_config())
+    same_args = {"query": "same"}
+    responses = [
+        _mock_response(
+            content="",
+            finish_reason="tool_calls",
+            tool_calls=[_mock_tool_call("web_search", json.dumps(same_args), "c-plugin-turn")],
+        ),
+        _mock_response(content="should-not-be-used", finish_reason="stop", tool_calls=None),
+    ]
+    agent.client.chat.completions.create.side_effect = responses
+
+    with (
+        patch("hermes_cli.plugins.get_pre_tool_call_block_message", return_value="plugin policy"),
+        patch("run_agent.handle_function_call", return_value="SHOULD_NOT_RUN") as mock_hfc,
+        patch.object(agent, "_persist_session"),
+        patch.object(agent, "_save_trajectory"),
+        patch.object(agent, "_cleanup_task_resources"),
+    ):
+        result = agent.run_conversation("search repeatedly")
+
+    mock_hfc.assert_not_called()
+    assert agent.client.chat.completions.create.call_count == 1
+    assert result["turn_exit_reason"] == "guardrail_halt"
+    assert "pre_tool_call hook blocked it" in result["final_response"]
+    assert "plugin policy" in result["final_response"]
+    assert result["guardrail"]["code"] == "plugin_pre_tool_block_halt"
+    assert result["guardrail"]["tool_name"] == "web_search"
 
 
 def test_config_enabled_hard_stop_run_conversation_returns_controlled_guardrail_halt_without_top_level_error():

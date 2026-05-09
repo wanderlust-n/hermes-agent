@@ -88,6 +88,42 @@ class TestKimiProfile:
         assert tl["reasoning_effort"] == "medium"
 
 
+class TestXiaomiProfile:
+    def test_thinking_enabled(self):
+        p = get_provider_profile("xiaomi")
+        eb, tl = p.build_api_kwargs_extras(
+            reasoning_config={"enabled": True, "effort": "high"}
+        )
+        assert eb["thinking"] == {"type": "enabled"}
+        assert tl["reasoning_effort"] == "high"
+
+    def test_thinking_disabled(self):
+        p = get_provider_profile("xiaomi")
+        eb, tl = p.build_api_kwargs_extras(reasoning_config={"enabled": False})
+        assert eb["thinking"] == {"type": "disabled"}
+        assert "reasoning_effort" not in tl
+
+    def test_reasoning_effort_default(self):
+        p = get_provider_profile("xiaomi")
+        eb, tl = p.build_api_kwargs_extras(reasoning_config={"enabled": True})
+        assert eb["thinking"] == {"type": "enabled"}
+        assert tl["reasoning_effort"] == "medium"
+
+    def test_no_config_defaults(self):
+        p = get_provider_profile("xiaomi")
+        eb, tl = p.build_api_kwargs_extras(reasoning_config=None)
+        assert eb["thinking"] == {"type": "enabled"}
+        assert tl["reasoning_effort"] == "medium"
+
+    def test_invalid_reasoning_effort_falls_back_to_medium(self):
+        p = get_provider_profile("xiaomi")
+        eb, tl = p.build_api_kwargs_extras(
+            reasoning_config={"enabled": True, "effort": "xhigh"}
+        )
+        assert eb["thinking"] == {"type": "enabled"}
+        assert tl["reasoning_effort"] == "medium"
+
+
 class TestOpenRouterProfile:
     def test_extra_body_with_prefs(self):
         p = get_provider_profile("openrouter")

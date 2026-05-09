@@ -122,6 +122,61 @@ class TestKimiParity:
         assert kw.get("reasoning_effort") == "medium"
 
 
+class TestXiaomiParity:
+    """Xiaomi/MiMo: thinking in extra_body, reasoning_effort top-level."""
+
+    def test_thinking_enabled(self, transport):
+        kw = transport.build_kwargs(
+            model="mimo-v2.5-pro",
+            messages=_simple_messages(),
+            tools=None,
+            provider_profile=get_provider_profile("xiaomi"),
+            reasoning_config={"enabled": True, "effort": "high"},
+        )
+        assert kw["extra_body"]["thinking"] == {"type": "enabled"}
+
+    def test_thinking_disabled(self, transport):
+        kw = transport.build_kwargs(
+            model="mimo-v2.5-pro",
+            messages=_simple_messages(),
+            tools=None,
+            provider_profile=get_provider_profile("xiaomi"),
+            reasoning_config={"enabled": False},
+        )
+        assert kw["extra_body"]["thinking"] == {"type": "disabled"}
+
+    def test_reasoning_effort_top_level(self, transport):
+        kw = transport.build_kwargs(
+            model="mimo-v2.5-pro",
+            messages=_simple_messages(),
+            tools=None,
+            provider_profile=get_provider_profile("xiaomi"),
+            reasoning_config={"enabled": True, "effort": "high"},
+        )
+        assert kw.get("reasoning_effort") == "high"
+        assert "reasoning_effort" not in kw.get("extra_body", {})
+
+    def test_reasoning_effort_default_medium(self, transport):
+        kw = transport.build_kwargs(
+            model="mimo-v2.5-pro",
+            messages=_simple_messages(),
+            tools=None,
+            provider_profile=get_provider_profile("xiaomi"),
+            reasoning_config={"enabled": True},
+        )
+        assert kw.get("reasoning_effort") == "medium"
+
+    def test_no_config_defaults(self, transport):
+        kw = transport.build_kwargs(
+            model="mimo-v2.5-pro",
+            messages=_simple_messages(),
+            tools=None,
+            provider_profile=get_provider_profile("xiaomi"),
+        )
+        assert kw["extra_body"]["thinking"] == {"type": "enabled"}
+        assert kw.get("reasoning_effort") == "medium"
+
+
 class TestOpenRouterParity:
     """OpenRouter: provider preferences, reasoning in extra_body."""
 

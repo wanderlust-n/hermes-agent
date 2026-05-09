@@ -9754,11 +9754,40 @@ class AIAgent:
 
     def _toolguard_controlled_halt_response(self, decision: ToolGuardrailDecision) -> str:
         tool = decision.tool_name or "a tool"
+        if decision.code == "plugin_pre_tool_block_halt":
+            detail = decision.message.strip() or "A pre_tool_call hook blocked the tool."
+            return (
+                f"I stopped before retrying {tool} because a pre_tool_call hook "
+                f"blocked it: {detail} Change strategy instead of repeating the "
+                "same call."
+            )
         return (
             f"I stopped retrying {tool} because it hit the tool-call guardrail "
             f"({decision.code}) after {decision.count} repeated non-progressing "
             "attempts. The last tool result explains the blocker; the next step is "
             "to change strategy instead of repeating the same call."
+        )
+
+    def _plugin_pre_tool_block_halt_decision(
+        self,
+        tool_name: str,
+        block_message: str | None,
+    ) -> ToolGuardrailDecision | None:
+        """Return a controlled-halt decision for plugin blocks when enabled.
+
+        Shell/Python ``pre_tool_call`` hooks can veto execution before the
+        built-in guardrail controller sees the call. When hard stops are
+        enabled, treat that veto as terminal for the current turn so the
+        model does not burn extra API calls retrying the same blocked tool.
+        """
+        if not block_message or not self._tool_guardrails.config.hard_stop_enabled:
+            return None
+        return ToolGuardrailDecision(
+            action="halt",
+            code="plugin_pre_tool_block_halt",
+            message=block_message,
+            tool_name=tool_name,
+            count=1,
         )
 
     def _append_guardrail_observation(
@@ -10009,6 +10038,12 @@ class AIAgent:
                 block_message = None
 
             if block_message is not None:
+                plugin_halt = self._plugin_pre_tool_block_halt_decision(
+                    function_name,
+                    block_message,
+                )
+                if plugin_halt is not None:
+                    self._set_tool_guardrail_halt(plugin_halt)
                 block_result = json.dumps({"error": block_message}, ensure_ascii=False)
             else:
                 guardrail_decision = self._tool_guardrails.before_call(function_name, function_args)
@@ -10378,6 +10413,13 @@ class AIAgent:
                 )
             except Exception:
                 pass
+            if _block_msg is not None:
+                plugin_halt = self._plugin_pre_tool_block_halt_decision(
+                    function_name,
+                    _block_msg,
+                )
+                if plugin_halt is not None:
+                    self._set_tool_guardrail_halt(plugin_halt)
 
             _guardrail_block_decision: ToolGuardrailDecision | None = None
             if _block_msg is None:
