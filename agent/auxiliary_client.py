@@ -1490,9 +1490,33 @@ def _resolve_custom_runtime() -> Tuple[Optional[str], Optional[str], Optional[st
         logger.debug("Auxiliary client: custom runtime resolution failed: %s", exc)
         runtime = None
 
+    openai_base = os.getenv("OPENAI_BASE_URL", "").strip().rstrip("/")
+    openai_key = os.getenv("OPENAI_API_KEY", "").strip()
+
+    if isinstance(runtime, dict):
+        cfg_provider = _read_main_provider()
+        # A named provider may legitimately use model.base_url for a custom
+        # upstream or local proxy (for example Xiaomi routed through a local
+        # debug proxy). That does NOT mean bare "custom" fallback is configured.
+        # Without this guard, auxiliary connection fallback can reinterpret the
+        # named provider's base_url as a no-auth custom endpoint and then retry
+        # the same host with "no-key-required", producing confusing 401s while
+        # the main provider still succeeds with its real API key.
+        if (
+            runtime.get("provider") == "custom"
+            and not openai_base
+            and cfg_provider
+            and cfg_provider not in {"auto", "custom"}
+            and not cfg_provider.startswith("custom:")
+        ):
+            logger.debug(
+                "Auxiliary client: ignoring bare custom runtime derived from "
+                "model.base_url because main provider is %s",
+                cfg_provider,
+            )
+            return None, None, None
+
     if not isinstance(runtime, dict):
-        openai_base = os.getenv("OPENAI_BASE_URL", "").strip().rstrip("/")
-        openai_key = os.getenv("OPENAI_API_KEY", "").strip()
         if not openai_base:
             return None, None, None
         runtime = {

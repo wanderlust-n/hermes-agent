@@ -26,6 +26,7 @@ from agent.auxiliary_client import (
     _normalize_aux_provider,
     _try_payment_fallback,
     _resolve_auto,
+    _resolve_custom_runtime,
     _CodexCompletionsAdapter,
 )
 
@@ -70,6 +71,26 @@ class TestAuxiliaryMaxTokensParam:
         with patch("agent.auxiliary_client._resolve_custom_runtime", return_value=("https://api.githubcopilot.com/chat/completions", "key", None)), \
              patch("agent.auxiliary_client._read_nous_auth", return_value=None):
             assert auxiliary_max_tokens_param(2048) == {"max_completion_tokens": 2048}
+
+
+class TestResolveCustomRuntime:
+    def test_ignores_named_provider_base_url_without_openai_env(self, monkeypatch):
+        monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        with (
+            patch(
+                "hermes_cli.runtime_provider.resolve_runtime_provider",
+                return_value={
+                    "provider": "custom",
+                    "api_mode": "chat_completions",
+                    "base_url": "http://127.0.0.1:8787/v1",
+                    "api_key": "no-key-required",
+                    "source": "env/config",
+                },
+            ),
+            patch("agent.auxiliary_client._read_main_provider", return_value="xiaomi"),
+        ):
+            assert _resolve_custom_runtime() == (None, None, None)
 
 
 class TestNormalizeAuxProvider:
