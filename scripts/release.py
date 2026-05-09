@@ -53,15 +53,20 @@ AUTHOR_MAP = {
     "harish.kukreja@gmail.com": "counterposition",
     "cleo@edaphic.xyz": "curiouscleo",
     "hirokazu.ogawa@kwansei.ac.jp": "hrkzogw",
+    "datapod.k@gmail.com": "dandacompany",
     "127238744+teknium1@users.noreply.github.com": "teknium1",
     "128259593+Gutslabs@users.noreply.github.com": "Gutslabs",
     "50326054+nocturnum91@users.noreply.github.com": "nocturnum91",
     "223003280+Abd0r@users.noreply.github.com": "Abd0r",
+    "ra2157218@gmail.com": "Abd0r",
     "abdielv@proton.me": "AJV20",
     "mason@growagainorchids.com": "masonjames",
     "ytchen0719@gmail.com": "liquidchen",
     "am@studio1.tailb672fe.ts.net": "subtract0",
     "axmaiqiu@gmail.com": "qWaitCrypto",
+    "egitimviscara@gmail.com": "uzunkuyruk",
+    "zhekinmaksim@gmail.com": "Zhekinmaksim",
+    "obafemiferanmi1999@gmail.com": "KvnGz",
     "159539633+MottledShadow@users.noreply.github.com": "MottledShadow",
     "aludwin+gh@gmail.com": "adamludwin",
     "ngusev@astralinux.ru": "NikolayGusev-astra",
@@ -141,6 +146,7 @@ AUTHOR_MAP = {
     "luwinyang@deepseek.com": "lsdsjy",
     "season.saw@gmail.com": "season179",
     "heathley@Heathley-MacBook-Air.local": "heathley",
+    "maliyldzhn@gmail.com": "heathley",
     "vlad19@gmail.com": "dandaka",
     "adamrummer@gmail.com": "cyclingwithelephants",
     # Temporary tool-progress cleanup salvage (May 2026)
@@ -907,6 +913,8 @@ AUTHOR_MAP = {
     "promptsiren@gmail.com": "firefly",  # PR #18123 salvage of #16660 (ContextVars)
     "wtyopenclaw@gmail.com": "WuTianyi123",  # PR #20275 salvage of #13723 (feishu markdown)
     "zhicheng.han@mathematik.uni-goettingen.de": "hanzckernel",  # PR #20311 (api-server approval events)
+    "agentsmithlaor@gmail.com": "oferlaor",  # PR #22356 salvage (cron origin sender identity)
+    "jhin.lee@unity3d.com": "leehack",  # PR #22053 salvage (telegram DM topic reply fallback)
     # pander: empty email, salvaged via PR #19665 from #16126 by @ms-alan
 }
 
@@ -1365,7 +1373,7 @@ def main():
     )
 
     if args.output:
-        Path(args.output).write_text(changelog)
+        Path(args.output).write_text(changelog, encoding="utf-8")
         print(f"Changelog written to {args.output}")
     else:
         print(changelog)

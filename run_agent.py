@@ -20,6 +20,17 @@ Usage:
     response = agent.run_conversation("Tell me about the latest Python updates")
 """
 
+# IMPORTANT: hermes_bootstrap must be the very first import — UTF-8 stdio
+# on Windows.  No-op on POSIX.  See hermes_bootstrap.py for full rationale.
+try:
+    import hermes_bootstrap  # noqa: F401
+except ModuleNotFoundError:
+    # Graceful fallback when hermes_bootstrap isn't registered in the venv
+    # yet — happens during partial ``hermes update`` where git-reset landed
+    # new code but ``uv pip install -e .`` didn't finish.  Missing bootstrap
+    # means UTF-8 stdio setup is skipped on Windows; POSIX is unaffected.
+    pass
+
 import asyncio
 import base64
 import concurrent.futures
@@ -3820,7 +3831,7 @@ class AIAgent:
                 pass
             review_agent = None
             try:
-                with open(os.devnull, "w") as _devnull, \
+                with open(os.devnull, "w", encoding="utf-8") as _devnull, \
                      contextlib.redirect_stdout(_devnull), \
                      contextlib.redirect_stderr(_devnull):
                     # Inherit the parent agent's live runtime (provider, model,
@@ -9887,7 +9898,8 @@ class AIAgent:
             )
         elif function_name == "session_search":
             if not self._session_db:
-                return json.dumps({"success": False, "error": "Session database not available."})
+                from hermes_state import format_session_db_unavailable
+                return json.dumps({"success": False, "error": format_session_db_unavailable()})
             from tools.session_search_tool import session_search as _session_search
             return _session_search(
                 query=function_args.get("query", ""),
@@ -10523,7 +10535,8 @@ class AIAgent:
                     self._vprint(f"  {_get_cute_tool_message_impl('todo', function_args, tool_duration, result=function_result)}")
             elif function_name == "session_search":
                 if not self._session_db:
-                    function_result = json.dumps({"success": False, "error": "Session database not available."})
+                    from hermes_state import format_session_db_unavailable
+                    function_result = json.dumps({"success": False, "error": format_session_db_unavailable()})
                 else:
                     from tools.session_search_tool import session_search as _session_search
                     function_result = _session_search(
