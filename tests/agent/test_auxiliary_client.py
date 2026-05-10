@@ -83,7 +83,7 @@ class TestResolveCustomRuntime:
                 return_value={
                     "provider": "custom",
                     "api_mode": "chat_completions",
-                    "base_url": "http://127.0.0.1:8787/v1",
+                    "base_url": "https://debug-proxy.invalid/v1",
                     "api_key": "no-key-required",
                     "source": "env/config",
                 },

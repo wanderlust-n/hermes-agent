@@ -17,6 +17,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from agent.codex_responses_adapter import _chat_messages_to_responses_input, _normalize_codex_response, _preflight_codex_input_items
+from agent.transports.types import NormalizedResponse, ToolCall
 
 import run_agent
 from run_agent import AIAgent
@@ -274,6 +275,84 @@ class TestHasContentAfterThinkBlock:
 
     def test_no_think_block_returns_true(self, agent):
         assert agent._has_content_after_think_block("just normal content") is True
+
+
+def test_llm_debug_trace_writes_request_event(agent, monkeypatch, tmp_path):
+    monkeypatch.setenv("HERMES_DUMP_LLM_TRACE", "1")
+    agent.logs_dir = tmp_path
+
+    trace_file = agent._start_llm_debug_trace(
+        {
+            "model": "gpt-4o",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": True,
+            "timeout": "drop-me",
+        },
+        stream=True,
+    )
+
+    lines = trace_file.read_text(encoding="utf-8").splitlines()
+    payload = json.loads(lines[0])
+    assert payload["kind"] == "request"
+    assert payload["stream"] is True
+    assert "timeout" not in payload["request"]
+    assert payload["request"]["model"] == "gpt-4o"
+
+
+def test_llm_debug_trace_wraps_sse_events(agent, monkeypatch, tmp_path):
+    monkeypatch.setenv("HERMES_DUMP_LLM_TRACE", "1")
+    agent.logs_dir = tmp_path
+    trace_file = agent._start_llm_debug_trace({"model": "gpt-4o"}, stream=True)
+
+    class _FakeStream:
+        def _iter_events(self):
+            yield SimpleNamespace(event="message", data='{"id":"evt_1"}')
+            yield SimpleNamespace(event=None, data="[DONE]")
+
+    fake_stream = _FakeStream()
+    agent._attach_llm_debug_sse_trace(fake_stream, trace_file)
+    events = list(fake_stream._iter_events())
+
+    assert len(events) == 2
+    payloads = [
+        json.loads(line)
+        for line in trace_file.read_text(encoding="utf-8").splitlines()
+    ]
+    assert payloads[1]["kind"] == "sse"
+    assert payloads[1]["event"] == "message"
+    assert payloads[1]["data"] == '{"id":"evt_1"}'
+
+
+def test_llm_debug_trace_records_normalized_response(agent, monkeypatch, tmp_path):
+    monkeypatch.setenv("HERMES_DUMP_LLM_TRACE", "1")
+    agent.logs_dir = tmp_path
+    trace_file = agent._start_llm_debug_trace({"model": "gpt-4o"}, stream=True)
+
+    normalized = NormalizedResponse(
+        content="hello",
+        tool_calls=[
+            ToolCall(
+                id="call_1",
+                name="terminal",
+                arguments='{"cmd":"pwd"}',
+                provider_data={"extra": True},
+            )
+        ],
+        finish_reason="tool_calls",
+        reasoning="thinking",
+        provider_data={"reasoning_content": "thinking"},
+    )
+
+    agent._record_llm_debug_normalized_response(trace_file, normalized)
+
+    payloads = [
+        json.loads(line)
+        for line in trace_file.read_text(encoding="utf-8").splitlines()
+    ]
+    assert payloads[-1]["kind"] == "normalized_response"
+    assert payloads[-1]["finish_reason"] == "tool_calls"
+    assert payloads[-1]["tool_calls"][0]["name"] == "terminal"
+    assert payloads[-1]["tool_calls"][0]["arguments"] == '{"cmd":"pwd"}'
 
 
 class TestStripThinkBlocks:

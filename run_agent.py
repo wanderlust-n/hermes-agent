@@ -1320,6 +1320,8 @@ class AIAgent:
         self._executing_tools = False
         self._tool_guardrails = ToolCallGuardrailController()
         self._tool_guardrail_halt_decision: ToolGuardrailDecision | None = None
+        self._llm_debug_trace_lock = threading.Lock()
+        self._current_llm_debug_trace_file: Optional[Path] = None
 
         # Interrupt mechanism for breaking out of tool loops
         self._interrupt_requested = False
@@ -4679,6 +4681,175 @@ class AIAgent:
                 logging.warning(f"Failed to dump API request debug payload: {dump_error}")
             return None
 
+    def _llm_debug_trace_enabled(self) -> bool:
+        """Return True when per-request LLM trace dumps are enabled."""
+        return env_var_enabled("HERMES_DUMP_LLM_TRACE")
+
+    def _serialize_llm_debug_value(self, value: Any) -> Any:
+        """Best-effort JSON-safe serializer for trace payloads."""
+        from dataclasses import asdict, is_dataclass
+
+        if value is None or isinstance(value, (str, int, float, bool)):
+            return value
+        if isinstance(value, Path):
+            return str(value)
+        if isinstance(value, dict):
+            return {
+                str(k): self._serialize_llm_debug_value(v)
+                for k, v in value.items()
+            }
+        if isinstance(value, (list, tuple, set)):
+            return [self._serialize_llm_debug_value(v) for v in value]
+        if is_dataclass(value):
+            return self._serialize_llm_debug_value(asdict(value))
+        if hasattr(value, "model_dump"):
+            try:
+                return self._serialize_llm_debug_value(value.model_dump())
+            except Exception:
+                pass
+        if hasattr(value, "dict"):
+            try:
+                return self._serialize_llm_debug_value(value.dict())
+            except Exception:
+                pass
+        if isinstance(value, SimpleNamespace):
+            return {
+                k: self._serialize_llm_debug_value(v)
+                for k, v in vars(value).items()
+            }
+        if hasattr(value, "__dict__") and not isinstance(value, type):
+            try:
+                return {
+                    k: self._serialize_llm_debug_value(v)
+                    for k, v in vars(value).items()
+                    if not k.startswith("_")
+                }
+            except Exception:
+                pass
+        return str(value)
+
+    def _append_llm_debug_trace(self, trace_file: Optional[Path], payload: Dict[str, Any]) -> None:
+        """Append one JSONL event to the active LLM trace file."""
+        if not trace_file:
+            return
+        try:
+            record = {
+                "timestamp": datetime.now().isoformat(),
+                "session_id": self.session_id,
+                **payload,
+            }
+            with self._llm_debug_trace_lock:
+                with trace_file.open("a", encoding="utf-8") as fh:
+                    fh.write(
+                        json.dumps(
+                            self._serialize_llm_debug_value(record),
+                            ensure_ascii=False,
+                            default=str,
+                        )
+                    )
+                    fh.write("\n")
+        except Exception as trace_error:
+            if self.verbose_logging:
+                logging.warning("Failed to append LLM debug trace: %s", trace_error)
+
+    def _start_llm_debug_trace(self, api_kwargs: Dict[str, Any], *, stream: bool) -> Optional[Path]:
+        """Create a per-request trace file and write the final request payload."""
+        self._current_llm_debug_trace_file = None
+        if not self._llm_debug_trace_enabled():
+            return None
+        try:
+            request_body = copy.deepcopy(api_kwargs)
+            request_body.pop("timeout", None)
+            request_body = {k: v for k, v in request_body.items() if v is not None}
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+            trace_file = self.logs_dir / f"llm_trace_{self.session_id}_{timestamp}.jsonl"
+            self._append_llm_debug_trace(
+                trace_file,
+                {
+                    "kind": "request",
+                    "provider": self.provider,
+                    "api_mode": self.api_mode,
+                    "model": self.model,
+                    "base_url": self.base_url,
+                    "stream": stream,
+                    "request": request_body,
+                },
+            )
+            self._current_llm_debug_trace_file = trace_file
+            return trace_file
+        except Exception as trace_error:
+            if self.verbose_logging:
+                logging.warning("Failed to start LLM debug trace: %s", trace_error)
+            return None
+
+    def _attach_llm_debug_sse_trace(self, stream: Any, trace_file: Optional[Path]) -> None:
+        """Wrap the OpenAI SDK SSE iterator so each event is recorded."""
+        if not trace_file or stream is None or not hasattr(stream, "_iter_events"):
+            return
+        try:
+            original_iter_events = stream._iter_events
+
+            def _iter_events_with_trace():
+                for sse in original_iter_events():
+                    self._append_llm_debug_trace(
+                        trace_file,
+                        {
+                            "kind": "sse",
+                            "event": getattr(sse, "event", None),
+                            "data": getattr(sse, "data", None),
+                        },
+                    )
+                    yield sse
+
+            stream._iter_events = _iter_events_with_trace
+        except Exception as trace_error:
+            if self.verbose_logging:
+                logging.warning("Failed to attach SSE debug trace: %s", trace_error)
+
+    def _record_llm_debug_chunk(self, trace_file: Optional[Path], chunk: Any) -> None:
+        """Record one parsed stream chunk after SDK decoding."""
+        self._append_llm_debug_trace(
+            trace_file,
+            {
+                "kind": "chunk",
+                "chunk": self._serialize_llm_debug_value(chunk),
+            },
+        )
+
+    def _record_llm_debug_normalized_response(
+        self,
+        trace_file: Optional[Path],
+        normalized: Any,
+    ) -> None:
+        """Record the parsed assistant/tool-call object after normalization."""
+        if not trace_file:
+            return
+        try:
+            tool_calls = []
+            for tc in getattr(normalized, "tool_calls", None) or []:
+                tool_calls.append(
+                    {
+                        "id": getattr(tc, "id", None),
+                        "name": getattr(tc, "name", None),
+                        "arguments": getattr(tc, "arguments", None),
+                        "provider_data": getattr(tc, "provider_data", None),
+                    }
+                )
+            self._append_llm_debug_trace(
+                trace_file,
+                {
+                    "kind": "normalized_response",
+                    "finish_reason": getattr(normalized, "finish_reason", None),
+                    "content": getattr(normalized, "content", None),
+                    "reasoning": getattr(normalized, "reasoning", None),
+                    "provider_data": getattr(normalized, "provider_data", None),
+                    "tool_calls": tool_calls,
+                },
+            )
+        finally:
+            if self._current_llm_debug_trace_file == trace_file:
+                self._current_llm_debug_trace_file = None
+
     @staticmethod
     def _clean_session_content(content: str) -> str:
         """Convert REASONING_SCRATCHPAD to think tags and clean up whitespace."""
@@ -6848,6 +7019,7 @@ class AIAgent:
 
         def _call():
             try:
+                trace_file = self._start_llm_debug_trace(api_kwargs, stream=False)
                 if self.api_mode == "codex_responses":
                     request_client_holder["client"] = self._create_request_openai_client(
                         reason="codex_stream_request",
@@ -7306,11 +7478,13 @@ class AIAgent:
                 reason="chat_completion_stream_request",
                 api_kwargs=stream_kwargs,
             )
+            trace_file = self._start_llm_debug_trace(stream_kwargs, stream=True)
             # Reset stale-stream timer so the detector measures from this
             # attempt's start, not a previous attempt's last chunk.
             last_chunk_time["t"] = time.time()
             self._touch_activity("waiting for provider response (streaming)")
             stream = request_client_holder["client"].chat.completions.create(**stream_kwargs)
+            self._attach_llm_debug_sse_trace(stream, trace_file)
 
             # Capture rate limit headers from the initial HTTP response.
             # The OpenAI SDK Stream object exposes the underlying httpx
@@ -7335,6 +7509,7 @@ class AIAgent:
             reasoning_parts: list = []
             usage_obj = None
             for chunk in stream:
+                self._record_llm_debug_chunk(trace_file, chunk)
                 last_chunk_time["t"] = time.time()
                 self._touch_activity("receiving stream response")
 
@@ -13654,6 +13829,10 @@ class AIAgent:
                 if self.api_mode == "anthropic_messages":
                     _normalize_kwargs["strip_tool_prefix"] = self._is_anthropic_oauth
                 normalized = _transport.normalize_response(response, **_normalize_kwargs)
+                self._record_llm_debug_normalized_response(
+                    self._current_llm_debug_trace_file,
+                    normalized,
+                )
                 assistant_message = normalized
                 finish_reason = normalized.finish_reason
                 
