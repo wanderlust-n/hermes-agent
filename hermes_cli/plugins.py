@@ -818,8 +818,18 @@ class PluginManager:
         if not path.is_dir():
             return manifests
 
-        for child in sorted(path.iterdir()):
-            if not child.is_dir():
+        try:
+            children = sorted(path.iterdir())
+        except PermissionError as exc:
+            logger.warning("Cannot list plugin directory %s (permission denied): %s", path, exc)
+            return manifests
+
+        for child in children:
+            try:
+                if not child.is_dir():
+                    continue
+            except PermissionError as exc:
+                logger.warning("Cannot stat plugin entry %s (permission denied): %s", child, exc)
                 continue
             if depth == 0 and skip_names and child.name in skip_names:
                 continue
