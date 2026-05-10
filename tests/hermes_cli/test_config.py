@@ -1,6 +1,7 @@
 """Tests for hermes_cli configuration management."""
 
 import os
+import stat
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
@@ -58,6 +59,20 @@ class TestEnsureHermesHome:
             soul_path.write_text("custom soul", encoding="utf-8")
             ensure_hermes_home()
             assert soul_path.read_text(encoding="utf-8") == "custom soul"
+
+    def test_preserves_existing_directory_mode(self, tmp_path):
+        with patch.dict(os.environ, {"HERMES_HOME": str(tmp_path)}):
+            tmp_path.chmod(0o750)
+            existing = tmp_path / "sessions"
+            existing.mkdir()
+            existing.chmod(0o770)
+
+            ensure_hermes_home()
+
+            assert stat.S_IMODE(tmp_path.stat().st_mode) == 0o750
+            assert stat.S_IMODE(existing.stat().st_mode) == 0o770
+            assert (tmp_path / "cron").is_dir()
+            assert stat.S_IMODE((tmp_path / "cron").stat().st_mode) == 0o700
 
 
 class TestLoadConfigDefaults:

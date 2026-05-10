@@ -357,12 +357,20 @@ def ensure_hermes_home():
         finally:
             os.umask(old_umask)
     else:
+        home_created = not home.exists()
         home.mkdir(parents=True, exist_ok=True)
-        _secure_dir(home)
+        # Only harden directories we create ourselves. Existing homes may
+        # intentionally carry custom group/setgid/ACL policies for shared
+        # gateway setups; re-chmodding them on every save would silently
+        # clobber that admin-managed policy.
+        if home_created:
+            _secure_dir(home)
         for subdir in ("cron", "sessions", "logs", "logs/curator", "memories"):
             d = home / subdir
+            created = not d.exists()
             d.mkdir(parents=True, exist_ok=True)
-            _secure_dir(d)
+            if created:
+                _secure_dir(d)
         _ensure_default_soul_md(home)
 
 
