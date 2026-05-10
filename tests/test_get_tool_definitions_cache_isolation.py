@@ -92,3 +92,32 @@ class TestQuietModeCacheIsolation:
         explains why the bug only hit Gateway."""
         model_tools.get_tool_definitions(quiet_mode=False)
         assert len(model_tools._tool_defs_cache) == 0
+
+    def test_env_fingerprint_invalidates_quiet_mode_cache(self, monkeypatch):
+        """Changing .env-backed credentials must invalidate the quiet-mode
+        schema cache so newly-available tools appear immediately."""
+        calls = {"count": 0}
+        env_state = [("env-a", 1, 1)]
+
+        def fake_compute(enabled_toolsets, disabled_toolsets, quiet_mode):
+            calls["count"] += 1
+            return [{
+                "type": "function",
+                "function": {"name": f"tool_{calls['count']}"},
+            }]
+
+        monkeypatch.setattr(
+            model_tools, "_tool_cache_env_fingerprint", lambda: tuple(env_state)
+        )
+        monkeypatch.setattr(model_tools, "_compute_tool_definitions", fake_compute)
+
+        first = model_tools.get_tool_definitions(quiet_mode=True)
+        second = model_tools.get_tool_definitions(quiet_mode=True)
+        assert calls["count"] == 1
+        assert first[0]["function"]["name"] == "tool_1"
+        assert second[0]["function"]["name"] == "tool_1"
+
+        env_state[:] = [("env-b", 2, 2)]
+        third = model_tools.get_tool_definitions(quiet_mode=True)
+        assert calls["count"] == 2
+        assert third[0]["function"]["name"] == "tool_2"

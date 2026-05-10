@@ -12635,6 +12635,8 @@ class GatewayRunner:
         ("compression", "target_ratio"),
         ("compression", "protect_last_n"),
         ("agent", "disabled_toolsets"),
+        ("image_gen", "provider"),
+        ("image_gen", "model"),
     )
 
     @classmethod
@@ -12665,6 +12667,15 @@ class GatewayRunner:
             out["tools.registry_generation"] = getattr(registry, "_generation", None)
         except Exception:
             out["tools.registry_generation"] = None
+        try:
+            from hermes_cli.env_loader import get_env_fingerprint
+
+            out["env.fingerprint"] = get_env_fingerprint(
+                hermes_home=os.getenv("HERMES_HOME"),
+                project_env=Path(__file__).resolve().parents[1] / ".env",
+            )
+        except Exception:
+            out["env.fingerprint"] = None
         return out
 
     @staticmethod

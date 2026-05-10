@@ -173,3 +173,31 @@ def load_hermes_dotenv(
         loaded.append(project_env_path)
 
     return loaded
+
+
+def get_env_fingerprint(
+    *,
+    hermes_home: str | os.PathLike | None = None,
+    project_env: str | os.PathLike | None = None,
+) -> tuple[tuple[str, int, int], ...]:
+    """Return a stable fingerprint for Hermes-managed .env files.
+
+    The fingerprint is based on ``(path, mtime_ns, size)`` for each env file
+    that currently exists. Callers can include it in cache keys so tool
+    availability updates immediately after credential edits (for example
+    adding ``OPENAI_API_KEY`` to enable ``image_generate``) instead of waiting
+    for process restart or TTL expiry.
+    """
+    home_path = Path(hermes_home or os.getenv("HERMES_HOME", Path.home() / ".hermes"))
+    candidates = [home_path / ".env"]
+    if project_env:
+        candidates.append(Path(project_env))
+
+    fingerprint: list[tuple[str, int, int]] = []
+    for path in candidates:
+        try:
+            stat = path.stat()
+        except (FileNotFoundError, OSError):
+            continue
+        fingerprint.append((str(path), stat.st_mtime_ns, stat.st_size))
+    return tuple(fingerprint)

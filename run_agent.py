@@ -119,12 +119,16 @@ else:
 
 
 # Import our tool system
+from tools.registry import invalidate_check_fn_cache
 from model_tools import (
+    _clear_tool_defs_cache,
     get_tool_definitions,
     get_toolset_for_tool,
     handle_function_call,
     check_toolset_requirements,
 )
+invalidate_check_fn_cache()
+_clear_tool_defs_cache()
 from tools.terminal_tool import cleanup_vm, get_active_env, is_persistent_env
 from tools.terminal_tool import (
     set_approval_callback as _set_approval_callback,

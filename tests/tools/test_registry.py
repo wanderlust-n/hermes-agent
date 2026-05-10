@@ -5,6 +5,7 @@ import threading
 from pathlib import Path
 from unittest.mock import patch
 
+import tools.registry as registry_mod
 from tools.registry import ToolRegistry, discover_builtin_tools
 
 
@@ -110,6 +111,27 @@ class TestGetDefinitions:
         defs = reg.get_definitions({"first", "second"})
         assert len(defs) == 2
         assert calls["count"] == 1
+
+    def test_check_fn_cache_invalidates_when_env_changes(self, monkeypatch):
+        calls = {"count": 0}
+        env_state = [("env-a", 1, 1)]
+
+        def shared_check():
+            calls["count"] += 1
+            return True
+
+        monkeypatch.setattr(
+            registry_mod, "_check_fn_env_fingerprint", lambda: tuple(env_state)
+        )
+        registry_mod.invalidate_check_fn_cache()
+
+        assert registry_mod._check_fn_cached(shared_check) is True
+        assert registry_mod._check_fn_cached(shared_check) is True
+        assert calls["count"] == 1
+
+        env_state[:] = [("env-b", 2, 2)]
+        assert registry_mod._check_fn_cached(shared_check) is True
+        assert calls["count"] == 2
 
 
 class TestUnknownToolDispatch:

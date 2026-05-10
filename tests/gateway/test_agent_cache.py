@@ -221,6 +221,21 @@ class TestExtractCacheBustingConfig:
         assert out["model.context_length"] == 272_000
         assert out["model.max_tokens"] == 4096
 
+    def test_reads_image_gen_subkeys(self):
+        from gateway.run import GatewayRunner
+
+        out = GatewayRunner._extract_cache_busting_config(
+            {
+                "image_gen": {
+                    "provider": "openai",
+                    "model": "gpt-image-2-medium",
+                    "ignored": "x",
+                }
+            }
+        )
+        assert out["image_gen.provider"] == "openai"
+        assert out["image_gen.model"] == "gpt-image-2-medium"
+
     def test_reads_compression_subkeys(self):
         from gateway.run import GatewayRunner
 
@@ -278,6 +293,18 @@ class TestExtractCacheBustingConfig:
         out = GatewayRunner._extract_cache_busting_config({})
 
         assert out["tools.registry_generation"] == 12345
+
+    def test_extract_includes_env_fingerprint(self, monkeypatch):
+        from gateway.run import GatewayRunner
+
+        monkeypatch.setattr(
+            "hermes_cli.env_loader.get_env_fingerprint",
+            lambda **_: (("/fake/.env", 10, 20),),
+        )
+
+        out = GatewayRunner._extract_cache_busting_config({})
+
+        assert out["env.fingerprint"] == (("/fake/.env", 10, 20),)
 
     def test_full_round_trip_busts_cache_on_real_edit(self):
         """End-to-end: simulate a config edit on main and verify the

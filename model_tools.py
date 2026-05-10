@@ -23,8 +23,10 @@ Public API (signatures preserved from the original 2,400-line version):
 import json
 import asyncio
 import logging
+import os
 import threading
 import time
+from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
 
 from tools.registry import discover_builtin_tools, registry
@@ -261,6 +263,19 @@ _LEGACY_TOOLSET_MAP = {
 _tool_defs_cache: Dict[tuple, List[Dict[str, Any]]] = {}
 
 
+def _tool_cache_env_fingerprint():
+    """Fingerprint env files that affect tool availability checks."""
+    try:
+        from hermes_cli.env_loader import get_env_fingerprint
+
+        return get_env_fingerprint(
+            hermes_home=os.getenv("HERMES_HOME"),
+            project_env=Path(__file__).with_name(".env"),
+        )
+    except Exception:
+        return ()
+
+
 def _clear_tool_defs_cache() -> None:
     """Drop memoized get_tool_definitions() results. Called when dynamic
     schema dependencies change (e.g. discord capability cache reset,
@@ -302,11 +317,13 @@ def get_tool_definitions(
             cfg_fp = (cfg_stat.st_mtime_ns, cfg_stat.st_size)
         except (FileNotFoundError, OSError, ImportError):
             cfg_fp = None
+        env_fp = _tool_cache_env_fingerprint()
         cache_key = (
             frozenset(enabled_toolsets) if enabled_toolsets is not None else None,
             frozenset(disabled_toolsets) if disabled_toolsets else None,
             registry._generation,
             cfg_fp,
+            env_fp,
         )
         cached = _tool_defs_cache.get(cache_key)
         if cached is not None:

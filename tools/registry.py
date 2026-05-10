@@ -18,6 +18,7 @@ import ast
 import importlib
 import json
 import logging
+import os
 import threading
 import time
 from pathlib import Path
@@ -111,25 +112,39 @@ class ToolEntry:
 # ---------------------------------------------------------------------------
 
 _CHECK_FN_TTL_SECONDS = 30.0
-_check_fn_cache: Dict[Callable, tuple[float, bool]] = {}
+_check_fn_cache: Dict[Callable, tuple[float, bool, tuple[tuple[str, int, int], ...]]] = {}
 _check_fn_cache_lock = threading.Lock()
+
+
+def _check_fn_env_fingerprint() -> tuple[tuple[str, int, int], ...]:
+    """Fingerprint env files that can flip tool availability."""
+    try:
+        from hermes_cli.env_loader import get_env_fingerprint
+
+        return get_env_fingerprint(
+            hermes_home=os.getenv("HERMES_HOME"),
+            project_env=Path(__file__).resolve().parents[1] / ".env",
+        )
+    except Exception:
+        return ()
 
 
 def _check_fn_cached(fn: Callable) -> bool:
     """Return bool(fn()), TTL-cached across calls. Swallows exceptions as False."""
     now = time.monotonic()
+    env_fp = _check_fn_env_fingerprint()
     with _check_fn_cache_lock:
         cached = _check_fn_cache.get(fn)
         if cached is not None:
-            ts, value = cached
-            if now - ts < _CHECK_FN_TTL_SECONDS:
+            ts, value, cached_env_fp = cached
+            if cached_env_fp == env_fp and now - ts < _CHECK_FN_TTL_SECONDS:
                 return value
     try:
         value = bool(fn())
     except Exception:
         value = False
     with _check_fn_cache_lock:
-        _check_fn_cache[fn] = (now, value)
+        _check_fn_cache[fn] = (now, value, env_fp)
     return value
 
 
